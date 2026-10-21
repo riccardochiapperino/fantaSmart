@@ -80,7 +80,7 @@ export function DataManagementTab({
             <div>
               <div className="font-bold text-slate-900 dark:text-white">Azzera Acquisti Asta</div>
               <div className="text-[10px] text-slate-500 dark:text-slate-400">
-                Svuota la rosa e ripristina il budget a 500 crediti mantenendo il listone 2026.
+                Svuota la rosa e ripristina il budget iniziale della lega, mantenendo il listone 2026.
               </div>
             </div>
             <button

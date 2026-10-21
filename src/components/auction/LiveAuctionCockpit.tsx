@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Player, LeagueConfig } from '@/lib/types';
-import { useAuctionAdvisor } from '@/lib/advisor';
+import type { useAuctionAdvisor } from '@/lib/advisor';
 import {
   saveAuctionState,
   loadAuctionState,
@@ -20,6 +20,8 @@ import { OpponentsOverviewDrawer } from './OpponentsOverviewDrawer';
 import { ReleasePlayerModal } from '@/src/components/modals/ReleasePlayerModal';
 
 export interface LiveAuctionCockpitProps {
+  /** Advisor condiviso con il resto della pagina (unica fonte di verità di budget, rosa e prezzi) */
+  advisor: ReturnType<typeof useAuctionAdvisor>;
   selectedPlayer?: Player | null;
   onSelectPlayer?: (player: Player | null) => void;
   auctionId?: string;
@@ -27,11 +29,12 @@ export interface LiveAuctionCockpitProps {
 }
 
 export function LiveAuctionCockpit({
+  advisor,
   selectedPlayer: externalSelectedPlayer,
   onSelectPlayer: onExternalSelectPlayer,
   auctionId,
   isGuest,
-}: LiveAuctionCockpitProps = {}) {
+}: LiveAuctionCockpitProps) {
   // 1. Hydration Safety State per prevenire mismatch SSR/CSR in Next.js
   const [isHydrated, setIsHydrated] = useState(false);
   const [isSetupOpen, setIsSetupOpen] = useState(false);
@@ -47,7 +50,16 @@ export function LiveAuctionCockpit({
     }
   }, [externalSelectedPlayer]);
 
-  const selectedPlayer = externalSelectedPlayer !== undefined ? externalSelectedPlayer : internalSelectedPlayer;
+  const rawSelectedPlayer = externalSelectedPlayer !== undefined ? externalSelectedPlayer : internalSelectedPlayer;
+
+  // Versione aggiornata del giocatore in battuta (prezzo e stato seguono sempre le regole attuali della lega)
+  const selectedPlayer = useMemo(
+    () =>
+      rawSelectedPlayer
+        ? advisor.state.allPlayers.find(p => p.id === rawSelectedPlayer.id) ?? rawSelectedPlayer
+        : null,
+    [rawSelectedPlayer, advisor.state.allPlayers]
+  );
 
   const handleSelectPlayer = useCallback(
     (player: Player | null) => {
@@ -57,23 +69,13 @@ export function LiveAuctionCockpit({
     [onExternalSelectPlayer]
   );
 
-  // 2. Inizializzazione Hook di Stato Algoritmico Advisor isolato per singola asta
-  const advisor = useAuctionAdvisor({
-    auctionId,
-    isGuest,
-  });
-
-  // 3. Hydration Effect: Ripristina lo stato salvato (RAM volatile se Guest, localStorage isolato se registrato)
+  // 2. Hydration Effect: ripristina solo la cronologia transazioni (RAM volatile se Guest, localStorage se registrato).
+  // Rosa, budget e regole della lega sono gestiti dall'advisor condiviso: non vanno ripristinati da qui.
   useEffect(() => {
     setIsHydrated(true);
     const saved = loadAuctionState(auctionId, isGuest);
-    if (saved && saved.allPlayers && saved.allPlayers.length > 0) {
-      if (saved.leagueConfig) {
-        advisor.updateLeagueConfig(saved.leagueConfig);
-      }
-      if (saved.history) {
-        setHistory(saved.history);
-      }
+    if (saved?.history) {
+      setHistory(saved.history);
     }
   }, [auctionId, isGuest]);
 
@@ -95,6 +97,8 @@ export function LiveAuctionCockpit({
   // Handler Acquisto "Preso da Me" (Verde / Enter)
   const handleBuyMine = useCallback(
     (player: Player, price: number) => {
+      // Sicurezza: non registrare acquisti che superano i crediti disponibili
+      if (price > advisor.state.maxBid) return;
       advisor.buyPlayer(player.id, price, true);
 
       const newTx: TransactionRecord = {
@@ -143,9 +147,12 @@ export function LiveAuctionCockpit({
     const [lastTx, ...remainingHistory] = history;
     setHistory(remainingHistory);
 
-    // Ripristina lo stato del giocatore coinvolto
-    advisor.resetAuction();
-  }, [history, advisor]);
+    // Ripristina SOLO il giocatore dell'ultima transazione (torna libero, crediti restituiti)
+    advisor.releasePlayer(lastTx.player.id);
+    if (selectedPlayer?.id === lastTx.player.id) {
+      handleSelectPlayer(null);
+    }
+  }, [history, advisor, selectedPlayer, handleSelectPlayer]);
 
   // Handler Deselezione / Svincolo Giocatore
   const handleReleasePlayer = useCallback(
@@ -228,6 +235,9 @@ export function LiveAuctionCockpit({
         availablePlayers={advisor.state.availablePlayers}
         selectedPlayer={selectedPlayer}
         opponents={advisor.state.opponents}
+        remainingBudget={advisor.state.remainingBudget}
+        maxBid={advisor.state.maxBid}
+        slotsToFill={advisor.state.slotsToFill}
         onSelectPlayer={handleSelectPlayer}
         onBuyMine={handleBuyMine}
         onBuyOther={handleBuyOther}
@@ -240,6 +250,8 @@ export function LiveAuctionCockpit({
         <div className="lg:col-span-7">
           <PlayerFocusCard
             player={selectedPlayer}
+            remainingBudget={advisor.state.remainingBudget}
+            maxBid={advisor.state.maxBid}
             onBuyMine={handleBuyMine}
             onBuyOther={handleBuyOther}
             onRelease={handleReleasePlayer}

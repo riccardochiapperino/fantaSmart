@@ -10,8 +10,9 @@ Copilot per l'asta del **Fantacalcio Serie A 2026/2027**: durante la battuta liv
 
 ### Motore decisionale (`src/lib/advisor`)
 - **xFM / CPS** – fantamedia attesa e punteggio composito per ogni giocatore, calcolati da titolarità, rigoristi, piazzati e rischio infortuni.
-- **VORP e prezzo target dinamico** – valore sopra il giocatore di rimpiazzo, ricalcolato a ogni acquisto, con indice di inflazione di mercato.
-- **Ribilanciamento del budget** – un overspending viene assorbito dagli slot inferiori dello stesso reparto; un risparmio viene redistribuito sugli slot ancora aperti.
+- **VORP e prezzo consigliato fisso** – il prezzo consigliato di ogni giocatore è stabilito dalle regole della lega (budget, numero di squadre, slot per reparto, modificatore difesa) e dalle sue caratteristiche (FVM, titolarità, rigori, infortuni). **Non cambia durante l'asta**: pagare un giocatore più o meno del consigliato non altera il prezzo degli altri. Il denaro totale della lega viene ripartito tra i giocatori che verranno acquistati in ogni reparto; cambiando budget o modificatore i prezzi si ricalcolano. Indice di inflazione di mercato in tempo reale.
+- **Controllo del budget** – crediti rimasti sempre visibili, "dopo l'acquisto" in tempo reale, avviso e blocco se l'offerta supera il massimo possibile (si riserva 1 credito per ogni slot ancora da riempire).
+- **Ribilanciamento del budget per slot** – vista di pianificazione: un overspending viene assorbito dagli slot inferiori dello stesso reparto; un risparmio viene redistribuito sugli slot ancora aperti.
 - **Pairing calendario (38 giornate)** – alternanza casa/trasferta e complementarità di calendario (FDR) tra portieri e compagni di reparto, su matrice 20×20.
 - **Sostituti k-NN** – se perdi un obiettivo, propone i migliori alternativi per rendimento e prezzo.
 - **Suggerimenti di chiamata** – quali giocatori nominare per chiudere slot a buon prezzo e quali usare come "esche" per far spendere gli avversari.
@@ -28,7 +29,8 @@ Copilot per l'asta del **Fantacalcio Serie A 2026/2027**: durante la battuta liv
 
 Altre caratteristiche:
 - **Multi-asta**: ogni account può gestire più leghe indipendenti (budget, partecipanti, modificatore difesa, slot per ruolo).
-- **Cockpit da tastiera**: `Cmd/Ctrl+K` ricerca, `Invio` preso da me, `Maiusc+Invio` perso, `Ctrl+Z` annulla.
+- **Scorciatoie da tastiera (solo desktop)**: `Cmd/Ctrl+K` ricerca, `Invio` preso da me, `Maiusc+Invio` perso, `Ctrl+Z` annulla l'ultima transazione. Su smartphone e tablet sono disattivate e nascoste.
+- **Listone** con filtro stato (Liberi / Mia Rosa / Persi / Tutti): di default mostra solo i giocatori ancora liberi, quindi chi viene preso o perso sparisce subito.
 - **Gestione rosa**: modifica prezzo pagato, svincolo con riapertura slot, aggiunta manuale, esportazione CSV / testo per chat.
 - **Tema** chiaro/scuro/sistema e pannello impostazioni (lega, algoritmo, backup JSON, reset).
 - **UI mobile-first**: modali come bottom sheet, input anti-zoom iOS, barra di navigazione inferiore.

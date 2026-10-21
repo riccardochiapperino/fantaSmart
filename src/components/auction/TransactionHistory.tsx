@@ -3,6 +3,7 @@
 import React from 'react';
 import { TransactionRecord } from '@/lib/storage/auctionStorage';
 import { History, RotateCcw, UserCheck, UserX } from 'lucide-react';
+import { useHasKeyboard } from '@/hooks/useHasKeyboard';
 
 interface Props {
   history: TransactionRecord[];
@@ -11,6 +12,8 @@ interface Props {
 }
 
 export function TransactionHistory({ history, onUndo, onReleasePlayer }: Props) {
+  const hasKeyboard = useHasKeyboard();
+
   return (
     <section className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3">
       <div className="flex justify-between items-center border-b border-slate-800 pb-2.5">
@@ -22,9 +25,9 @@ export function TransactionHistory({ history, onUndo, onReleasePlayer }: Props) 
           <button
             onClick={onUndo}
             className="text-xs font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1 bg-rose-950/40 border border-rose-900/60 px-2.5 py-1 rounded-lg transition-all active:scale-95"
-            title="Annulla L'Ultimo Acquisto (Ctrl+Z)"
+            title={hasKeyboard ? "Annulla L'Ultimo Acquisto (Ctrl+Z)" : "Annulla L'Ultimo Acquisto"}
           >
-            <RotateCcw className="w-3.5 h-3.5" /> Annulla Ultimo (Ctrl+Z)
+            <RotateCcw className="w-3.5 h-3.5" /> Annulla Ultimo{hasKeyboard && ' (Ctrl+Z)'}
           </button>
         )}
       </div>

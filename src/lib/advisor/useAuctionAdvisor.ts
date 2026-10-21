@@ -21,8 +21,9 @@ import {
   calculateVORP,
   calculateInitialSlotBudgets,
   rebalanceSlotBudgets,
-  calculateDynamicTargetPriceForPlayer,
   calculateMarketInflation,
+  applyFixedPricing,
+  calculateMaxBid,
 } from './vorpEngine';
 import { findBestPairingsForPlayer } from './pairingEngine';
 import { getNearestNeighborsReplacements, getStrategicNominations } from './recommender';
@@ -80,10 +81,10 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
   const auctionId = options?.auctionId;
   const isGuest = options?.isGuest;
   const storageKey = auctionId ? `fanta_live_auction_${auctionId}` : STORAGE_KEY;
+  // Config di partenza della lega (quella scelta alla creazione dell'asta), usata anche per i ripristini
+  const defaultConfig = options?.initialConfig ?? MOCK_LEAGUE_CONFIG;
 
-  const [leagueConfig, setLeagueConfig] = useState<LeagueConfig>(
-    options?.initialConfig ?? MOCK_LEAGUE_CONFIG
-  );
+  const [leagueConfig, setLeagueConfig] = useState<LeagueConfig>(defaultConfig);
   const [schedule] = useState<ScheduleGrid>(
     options?.initialSchedule ?? REAL_SCHEDULE_2026
   );
@@ -145,13 +146,20 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
     [opponents, storageKey, isGuest]
   );
 
+  // Giocatori con prezzo consigliato, CPS e VORP calcolati dalle regole della lega.
+  // Il prezzo è FISSO: dipende solo da config + caratteristiche dei giocatori, non da acquisti o crediti rimasti.
+  const pricedPlayers = useMemo(
+    () => applyFixedPricing(allPlayers, leagueConfig),
+    [allPlayers, leagueConfig]
+  );
+
   // Calcolo sincrono ultra-veloce (<3ms) dello stato dell'Advisor & Market Scarcity
   const advisorState: AdvisorState = useMemo(() => {
     const startTime = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
-    const myRoster = allPlayers.filter(p => p.boughtFor !== undefined);
-    const lostPlayers = allPlayers.filter(p => p.isLost);
-    const availablePlayers = allPlayers.filter(
+    const myRoster = pricedPlayers.filter(p => p.boughtFor !== undefined);
+    const lostPlayers = pricedPlayers.filter(p => p.isLost);
+    const availablePlayers = pricedPlayers.filter(
       p => p.boughtFor === undefined && !p.isLost
     );
 
@@ -159,13 +167,18 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
     const remainingBudget = Math.max(0, leagueConfig.initialBudget - spentBudget);
     const totalLeagueBudget = leagueConfig.numTeams * leagueConfig.initialBudget;
 
+    // Slot ancora da riempire e massimo offribile (1 cr riservato per ogni slot successivo)
+    const totalSlots = Object.values(leagueConfig.slotsPerRole).reduce((a, b) => a + b, 0);
+    const slotsToFill = Math.max(0, totalSlots - myRoster.length);
+    const maxBid = calculateMaxBid(remainingBudget, slotsToFill);
+
     // 1. Scoring vettoriale veloce
-    const scoresMap = calculateAllPlayerScores(allPlayers);
+    const scoresMap = calculateAllPlayerScores(pricedPlayers);
 
     // 2. Baselines e VORP
-    const baselines = calculateRoleBaselines(allPlayers, leagueConfig);
+    const baselines = calculateRoleBaselines(pricedPlayers, leagueConfig, scoresMap);
 
-    // 3. Prezzi Target Dinamici per i liberi
+    // 3. Disponibili per reparto
     const availableByRole: Record<Role, Player[]> = {
       P: availablePlayers.filter(p => p.role === 'P'),
       D: availablePlayers.filter(p => p.role === 'D'),
@@ -173,25 +186,8 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
       A: availablePlayers.filter(p => p.role === 'A'),
     };
 
-    const targetPriceMap = new Map<number, number>();
-    for (const player of availablePlayers) {
-      const cps = scoresMap.get(player.id)?.cps ?? 0;
-      const vorp = calculateVORP(cps, baselines[player.role]);
-      const openAllocations = slotBudgets[player.role].filter(s => s.status === 'open');
-
-      const dynamicPrice = calculateDynamicTargetPriceForPlayer(
-        player,
-        vorp,
-        availableByRole[player.role],
-        openAllocations,
-        scoresMap,
-        baselines
-      );
-      targetPriceMap.set(player.id, dynamicPrice);
-    }
-
     // 4. Inflazione di Mercato
-    const currentInflation = calculateMarketInflation(allPlayers);
+    const currentInflation = calculateMarketInflation(pricedPlayers);
 
     // 5. Calcolo Market Scarcity (Intelligence Competitiva sui Rivali)
     const roles: Role[] = ['P', 'D', 'C', 'A'];
@@ -232,12 +228,14 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
       myRoster,
       availablePlayers,
       lostPlayers,
-      allPlayers,
+      allPlayers: pricedPlayers,
       opponents,
       marketScarcity,
       remainingBudget,
       spentBudget,
       totalLeagueBudget,
+      slotsToFill,
+      maxBid,
       currentInflation,
       targetBudgetsBySlot: slotBudgets,
       leagueConfig,
@@ -245,7 +243,7 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
       pairingMatrix,
       lastCalculationLatencyMs: latency,
     };
-  }, [allPlayers, leagueConfig, schedule, pairingMatrix, slotBudgets, opponents]);
+  }, [pricedPlayers, leagueConfig, schedule, pairingMatrix, slotBudgets, opponents]);
 
   /**
    * Registra l'acquisto di un giocatore nell'asta live:
@@ -480,29 +478,16 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
    */
   const getRecommendationsFor = useCallback(
     (playerId: number): { replacements: ReplacementRecommendation[]; calendarPairings: PairingScore[] } => {
-      const targetPlayer = allPlayers.find(p => p.id === playerId);
+      const targetPlayer = pricedPlayers.find(p => p.id === playerId);
       if (!targetPlayer) {
         return { replacements: [], calendarPairings: [] };
       }
 
-      const scoresMap = calculateAllPlayerScores(allPlayers);
-      const baselines = calculateRoleBaselines(allPlayers, leagueConfig);
+      const scoresMap = calculateAllPlayerScores(pricedPlayers);
 
+      // Prezzi fissi di lega: non dipendono dagli acquisti già fatti
       const targetPriceMap = new Map<number, number>();
-      for (const p of advisorState.availablePlayers) {
-        const cps = scoresMap.get(p.id)?.cps ?? 0;
-        const vorp = calculateVORP(cps, baselines[p.role]);
-        const openAllocations = slotBudgets[p.role].filter(s => s.status === 'open');
-        const price = calculateDynamicTargetPriceForPlayer(
-          p,
-          vorp,
-          advisorState.availablePlayers.filter(x => x.role === p.role),
-          openAllocations,
-          scoresMap,
-          baselines
-        );
-        targetPriceMap.set(p.id, price);
-      }
+      pricedPlayers.forEach(p => targetPriceMap.set(p.id, p.targetPrice ?? p.estPrice ?? 1));
 
       const cpsOnlyMap = new Map<number, number>();
       scoresMap.forEach((val, key) => cpsOnlyMap.set(key, val.cps));
@@ -524,7 +509,7 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
 
       return { replacements, calendarPairings };
     },
-    [allPlayers, advisorState.availablePlayers, leagueConfig, schedule, slotBudgets]
+    [pricedPlayers, advisorState.availablePlayers, schedule]
   );
 
   /**
@@ -532,7 +517,7 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
    */
   const getNextNomination = useCallback(
     (role?: Role, strategy: 'target' | 'bait' = 'target'): NominationRecommendation[] => {
-      const baselines = calculateRoleBaselines(allPlayers, leagueConfig);
+      const baselines = calculateRoleBaselines(pricedPlayers, leagueConfig);
 
       return getStrategicNominations(
         advisorState.availablePlayers,
@@ -543,7 +528,7 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
         4
       ).filter(rec => rec.type === strategy);
     },
-    [allPlayers, advisorState.availablePlayers, advisorState.myRoster, leagueConfig, slotBudgets]
+    [pricedPlayers, advisorState.availablePlayers, advisorState.myRoster, leagueConfig, slotBudgets]
   );
 
   /**
@@ -558,34 +543,53 @@ export function useAuctionAdvisor(options?: UseAuctionAdvisorOptions) {
           const newOpponents = createInitialOpponents(updated);
           setOpponents(newOpponents);
           persistState(allPlayers, updated, newOpponents);
+        } else if (newConfig.initialBudget !== undefined && newConfig.initialBudget !== prev.initialBudget) {
+          // Nuovo budget di lega: anche i rivali ripartono dal nuovo budget, al netto di quanto hanno già speso
+          const rescaledOpponents = opponents.map(o => ({
+            ...o,
+            remainingBudget: Math.max(0, updated.initialBudget - o.spentBudget),
+          }));
+          setOpponents(rescaledOpponents);
+          persistState(allPlayers, updated, rescaledOpponents);
         } else {
           persistState(allPlayers, updated);
         }
         return updated;
       });
     },
-    [allPlayers, persistState]
+    [allPlayers, opponents, persistState]
   );
 
   /**
-   * Ripristina il dataset ai dati di fabbrica
+   * Ripristina il dataset ai dati di fabbrica e la config con cui è stata creata la lega
    */
   const resetToFactoryDataset = useCallback(() => {
     setAllPlayers(REAL_PLAYERS_2026);
-    setLeagueConfig(MOCK_LEAGUE_CONFIG);
-    setSlotBudgets(calculateInitialSlotBudgets(MOCK_LEAGUE_CONFIG));
-    setOpponents(createInitialOpponents(MOCK_LEAGUE_CONFIG));
+    setLeagueConfig(defaultConfig);
+    setSlotBudgets(calculateInitialSlotBudgets(defaultConfig));
+    setOpponents(createInitialOpponents(defaultConfig));
     if (typeof window !== 'undefined') {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(storageKey);
     }
-  }, []);
+  }, [defaultConfig, storageKey]);
 
   /**
-   * Resetta lo stato dell'asta ai dati iniziali
+   * Azzera acquisti e perse mantenendo le regole della lega (budget, squadre, slot) e le
+   * modifiche fatte al database giocatori.
    */
   const resetAuction = useCallback(() => {
-    resetToFactoryDataset();
-  }, [resetToFactoryDataset]);
+    const clearedPlayers = allPlayers.map(p => ({
+      ...p,
+      boughtFor: undefined,
+      isLost: false,
+      boughtBy: undefined,
+    }));
+    const freshOpponents = createInitialOpponents(leagueConfig);
+    setAllPlayers(clearedPlayers);
+    setSlotBudgets(calculateInitialSlotBudgets(leagueConfig));
+    setOpponents(freshOpponents);
+    persistState(clearedPlayers, leagueConfig, freshOpponents);
+  }, [allPlayers, leagueConfig, persistState]);
 
   return {
     state: advisorState,

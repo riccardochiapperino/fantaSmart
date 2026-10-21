@@ -2,13 +2,20 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Player, OpponentTeam } from '@/lib/types';
-import { Search, UserCheck, UserX, Command, ArrowRight, Users } from 'lucide-react';
+import { Search, UserCheck, UserX, Command, ArrowRight, Users, AlertTriangle, Wallet } from 'lucide-react';
 import { cleanString } from '@/lib/ingestion';
+import { useHasKeyboard } from '@/hooks/useHasKeyboard';
 
 interface Props {
   availablePlayers: Player[];
   selectedPlayer: Player | null;
   opponents?: OpponentTeam[];
+  /** Crediti rimasti nella mia squadra */
+  remainingBudget: number;
+  /** Massimo offribile ora (lascia 1 cr per ogni slot ancora da riempire) */
+  maxBid: number;
+  /** Slot della mia rosa ancora da riempire */
+  slotsToFill: number;
   onSelectPlayer: (player: Player) => void;
   onBuyMine: (player: Player, price: number) => void;
   onBuyOther: (player: Player, price?: number, buyerId?: string) => void;
@@ -19,6 +26,9 @@ export function QuickActionBar({
   availablePlayers,
   selectedPlayer,
   opponents = [],
+  remainingBudget,
+  maxBid,
+  slotsToFill,
   onSelectPlayer,
   onBuyMine,
   onBuyOther,
@@ -28,6 +38,14 @@ export function QuickActionBar({
   const [priceInput, setPriceInput] = useState<string>('');
   const [selectedBuyerId, setSelectedBuyerId] = useState<string>('');
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  // Scorciatoie da tastiera attive e visibili solo su desktop (mai su smartphone/tablet touch)
+  const hasKeyboard = useHasKeyboard();
+
+  // Prezzo digitato e verifica budget in tempo reale
+  const typedPrice = Number(priceInput) || 0;
+  const remainingAfter = remainingBudget - typedPrice;
+  const overBudget = !!selectedPlayer && typedPrice > maxBid;
+  const overBy = typedPrice - maxBid;
 
   const searchInputRef = useRef<HTMLInputElement>(null);
   const priceInputRef = useRef<HTMLInputElement>(null);
@@ -55,8 +73,10 @@ export function QuickActionBar({
       .slice(0, 10);
   }, [availablePlayers, query]);
 
-  // Keyboard Shortcuts Global Listener (Cmd+K, Enter, Shift+Enter, Ctrl+Z)
+  // Keyboard Shortcuts Global Listener (Cmd+K, Enter, Shift+Enter, Ctrl+Z) - solo desktop
   useEffect(() => {
+    if (!hasKeyboard) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
       // Cmd + K / Ctrl + K -> Focus Search
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -83,7 +103,8 @@ export function QuickActionBar({
             // Shift + Enter -> Preso da Altro
             onBuyOther(selectedPlayer, price, selectedBuyerId || undefined);
           } else {
-            // Enter -> Preso da Me
+            // Enter -> Preso da Me (bloccato se supera i crediti disponibili)
+            if (price > maxBid) return;
             onBuyMine(selectedPlayer, price);
           }
           setQuery('');
@@ -94,7 +115,7 @@ export function QuickActionBar({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedPlayer, priceInput, selectedBuyerId, isDropdownOpen, onBuyMine, onBuyOther, onUndo]);
+  }, [hasKeyboard, selectedPlayer, priceInput, selectedBuyerId, isDropdownOpen, maxBid, onBuyMine, onBuyOther, onUndo]);
 
   const handleSelect = (player: Player) => {
     onSelectPlayer(player);
@@ -106,6 +127,7 @@ export function QuickActionBar({
   const handleBuyMineClick = () => {
     if (!selectedPlayer) return;
     const price = Number(priceInput) || selectedPlayer.targetPrice || selectedPlayer.estPrice || 1;
+    if (price > maxBid) return;
     onBuyMine(selectedPlayer, price);
     setQuery('');
   };
@@ -123,9 +145,11 @@ export function QuickActionBar({
         <span className="flex items-center gap-1.5">
           <Command className="w-4 h-4 text-cyan-400" /> ASTA LIVE • CHIAMATA CALCIATORE
         </span>
-        <span className="text-[11px] text-slate-400 font-semibold hidden sm:inline">
-          Premi <kbd className="bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-cyan-400">Cmd+K</kbd> per cercare
-        </span>
+        {hasKeyboard && (
+          <span className="text-[11px] text-slate-400 font-semibold">
+            Premi <kbd className="bg-slate-800 border border-slate-700 px-1.5 py-0.5 rounded text-cyan-400">Cmd+K</kbd> per cercare
+          </span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 sm:gap-3 items-center">
@@ -145,9 +169,11 @@ export function QuickActionBar({
               onFocus={() => setIsDropdownOpen(true)}
               className="w-full bg-slate-950 text-slate-100 placeholder-slate-500 font-semibold text-base sm:text-xs pl-9 pr-12 py-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-cyan-500 transition-all shadow-inner min-h-[44px] sm:min-h-0"
             />
-            <span className="absolute right-3 top-2.5 bg-slate-800 text-[10px] font-bold text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 hidden sm:inline">
-              ⌘K
-            </span>
+            {hasKeyboard && (
+              <span className="absolute right-3 top-2.5 bg-slate-800 text-[10px] font-bold text-slate-400 px-1.5 py-0.5 rounded border border-slate-700">
+                ⌘K
+              </span>
+            )}
           </div>
 
           {/* Autocomplete Dropdown List */}
@@ -204,7 +230,11 @@ export function QuickActionBar({
               placeholder="Prezzo cr"
               value={priceInput}
               onChange={e => setPriceInput(e.target.value)}
-              className="w-full bg-slate-950 text-cyan-300 font-black text-base text-center py-2 sm:py-2.5 rounded-xl border border-slate-700 focus:outline-none focus:border-cyan-500 shadow-inner min-h-[44px] sm:min-h-0"
+              className={`w-full bg-slate-950 font-black text-base text-center py-2 sm:py-2.5 rounded-xl border focus:outline-none shadow-inner min-h-[44px] sm:min-h-0 ${
+                overBudget
+                  ? 'text-rose-300 border-rose-500 focus:border-rose-400'
+                  : 'text-cyan-300 border-slate-700 focus:border-cyan-500'
+              }`}
             />
           </div>
 
@@ -230,12 +260,18 @@ export function QuickActionBar({
         <div className="sm:col-span-3 flex gap-2">
           <button
             type="button"
-            disabled={!selectedPlayer}
+            disabled={!selectedPlayer || overBudget}
             onClick={handleBuyMineClick}
             className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs py-2.5 px-2 rounded-xl transition-all shadow-lg flex items-center justify-center gap-1 active:scale-95 min-h-[48px]"
-            title="Premi Invio per registrare acquisto in mia rosa"
+            title={
+              overBudget
+                ? `Budget superato: puoi offrire al massimo ${maxBid} cr`
+                : hasKeyboard
+                ? 'Premi Invio per registrare acquisto in mia rosa'
+                : 'Registra acquisto in mia rosa'
+            }
           >
-            <UserCheck className="w-4 h-4" /> PRESO (Invio)
+            <UserCheck className="w-4 h-4" /> PRESO{hasKeyboard && ' (Invio)'}
           </button>
 
           <button
@@ -243,11 +279,39 @@ export function QuickActionBar({
             disabled={!selectedPlayer}
             onClick={handleBuyOtherClick}
             className="flex-1 bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-xs py-2.5 px-2 rounded-xl transition-all shadow-lg flex items-center justify-center gap-1 active:scale-95 min-h-[48px]"
-            title="Premi Shift+Invio per registrare acquisto da rivale"
+            title={hasKeyboard ? 'Premi Shift+Invio per registrare acquisto da rivale' : 'Registra acquisto da rivale'}
           >
-            <UserX className="w-4 h-4" /> PERSO (Shift)
+            <UserX className="w-4 h-4" /> PERSO{hasKeyboard && ' (Shift)'}
           </button>
         </div>
+      </div>
+
+      {/* Crediti rimasti e controllo sforamento budget in tempo reale */}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[11px] font-semibold border-t border-slate-800 pt-2">
+        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-slate-300">
+          <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <span className="whitespace-nowrap">
+            Crediti rimasti:{' '}
+            <strong className="text-emerald-300 text-xs" suppressHydrationWarning>{remainingBudget} cr</strong>
+          </span>
+          <span className="text-slate-500" suppressHydrationWarning>
+            {slotsToFill > 0
+              ? `· ${slotsToFill} slot da riempire · max offerta ${maxBid} cr`
+              : '· rosa completa'}
+          </span>
+        </span>
+
+        {selectedPlayer && overBudget && (
+          <span className="flex items-center gap-1 text-rose-300 font-bold" role="alert">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            Sfori il budget di {overBy} cr: puoi offrire al massimo {maxBid} cr
+          </span>
+        )}
+        {selectedPlayer && !overBudget && typedPrice > 0 && (
+          <span className="text-slate-400">
+            Dopo l&apos;acquisto: <strong className="text-cyan-300">{remainingAfter} cr</strong>
+          </span>
+        )}
       </div>
     </section>
   );

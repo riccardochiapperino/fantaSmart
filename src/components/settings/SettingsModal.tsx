@@ -13,6 +13,7 @@ import {
   Check,
 } from 'lucide-react';
 import { useTheme } from '@/providers/ThemeProvider';
+import { useHasKeyboard } from '@/hooks/useHasKeyboard';
 import { LeagueConfig } from '@/lib/types';
 import { LeagueSettingsTab } from './LeagueSettingsTab';
 import { AlgorithmSettingsTab } from './AlgorithmSettingsTab';
@@ -43,6 +44,7 @@ export function SettingsModal({
 }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('appearance');
   const { theme, setTheme } = useTheme();
+  const hasKeyboard = useHasKeyboard();
 
   if (!isOpen) return null;
 
@@ -120,12 +122,14 @@ export function SettingsModal({
                 </div>
               </div>
 
+              {hasKeyboard && (
               <div className="bg-slate-50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-2">
                 <div className="font-bold text-slate-900 dark:text-white">Modalità Fullscreen &amp; Keyboard First</div>
                 <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
                   Fantasmart è ottimizzato per l'uso da tastiera: premi <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[10px]">Cmd + K</kbd> per cercare istantaneamente un giocatore, <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[10px]">Enter</kbd> per registrare l'acquisto e <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-mono text-[10px]">Ctrl + Z</kbd> per annullare.
                 </p>
               </div>
+              )}
             </div>
           )}
 

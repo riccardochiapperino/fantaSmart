@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Player, Role } from '@/lib/types';
 import { LiveAuctionCockpit } from '@/components/auction';
+import type { useAuctionAdvisor } from '@/lib/advisor';
 import {
   Search,
   PlusCircle,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 
 interface Props {
+  advisor: ReturnType<typeof useAuctionAdvisor>;
   players: Player[];
   onBuy: (player: Player, price: number) => void;
   onLost: (player: Player) => void;
@@ -23,7 +25,7 @@ interface Props {
 type StatusFilter = 'ALL' | 'AVAILABLE' | 'BOUGHT' | 'LOST';
 type SortOption = 'SLOT' | 'FVM' | 'EST_PRICE' | 'QTA' | 'NAME';
 
-export function AstaTab({ players, onBuy, onLost }: Props) {
+export function AstaTab({ advisor, players, onBuy, onLost }: Props) {
   const [viewMode, setViewMode] = useState<'cockpit' | 'list'>('cockpit');
 
   // Filtri principali
@@ -175,7 +177,7 @@ export function AstaTab({ players, onBuy, onLost }: Props) {
       </div>
 
       {viewMode === 'cockpit' ? (
-        <LiveAuctionCockpit />
+        <LiveAuctionCockpit advisor={advisor} />
       ) : (
         <div className="space-y-3">
           {/* Barra Superiore: Ricerca + Pulsante Filtri Avanzati */}

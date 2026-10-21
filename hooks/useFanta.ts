@@ -8,6 +8,8 @@ import { REAL_PLAYERS_2026, REAL_SCHEDULE_2026, REAL_PAIRING_MATRIX_2026 } from 
 export interface UseFantaOptions {
   auctionId?: string;
   isGuest?: boolean;
+  /** Regole della lega scelte alla creazione dell'asta (budget, squadre, slot, modificatore) */
+  initialConfig?: LeagueConfig;
 }
 
 export function useFanta(options?: UseFantaOptions) {
@@ -18,6 +20,7 @@ export function useFanta(options?: UseFantaOptions) {
     initialPlayers: REAL_PLAYERS_2026,
     initialSchedule: REAL_SCHEDULE_2026,
     initialPairingMatrix: REAL_PAIRING_MATRIX_2026,
+    initialConfig: options?.initialConfig,
     auctionId: options?.auctionId,
     isGuest: options?.isGuest,
   });
@@ -41,16 +44,25 @@ export function useFanta(options?: UseFantaOptions) {
   const spent = state.spentBudget;
   const remainingBudget = state.remainingBudget;
 
-  const remainingSlots = Math.max(0, 25 - squad.length);
+  const remainingSlots = state.slotsToFill;
+  const maxBid = state.maxBid;
   const avgPerSlot = remainingSlots > 0 ? (remainingBudget / remainingSlots).toFixed(1) : '0';
 
   // Wrapper polimorfico per buyPlayer (accetta sia Player object che playerId number)
   const buyPlayer = useCallback(
     (playerOrId: Player | number, price: number, isMine: boolean = true, buyerId?: string) => {
       const id = typeof playerOrId === 'number' ? playerOrId : playerOrId.id;
+      // Un acquisto mio non può superare i crediti disponibili (1 cr riservato per ogni slot ancora vuoto)
+      if (isMine && price > maxBid) {
+        alert(
+          `Budget superato: puoi offrire al massimo ${maxBid} crediti ` +
+            `(te ne restano ${remainingBudget}, con ${remainingSlots} slot ancora da riempire).`
+        );
+        return;
+      }
       advisorBuyPlayer(id, price, isMine, buyerId);
     },
-    [advisorBuyPlayer]
+    [advisorBuyPlayer, maxBid, remainingBudget, remainingSlots]
   );
 
   // Wrapper polimorfico per markAsLost
@@ -135,6 +147,8 @@ export function useFanta(options?: UseFantaOptions) {
     budget,
     spent,
     remainingBudget,
+    remainingSlots,
+    maxBid,
     avgPerSlot,
     activeTab,
     setActiveTab,
@@ -154,6 +168,7 @@ export function useFanta(options?: UseFantaOptions) {
     opponents: state.opponents,
     marketScarcity: state.marketScarcity,
     renameOpponent: advisor.renameOpponent,
+    advisor,
     advisorState: state,
     schedule: state.schedule,
     pairingMatrix: state.pairingMatrix,

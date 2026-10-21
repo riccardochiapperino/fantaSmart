@@ -3,23 +3,31 @@
 import React from 'react';
 import { Player } from '@/lib/types';
 import { calculateCPS, calculateXFM } from '@/lib/advisor/scoring';
-import { Target, AlertTriangle, Shield, Activity, Star, Sparkles } from 'lucide-react';
+import { Target, AlertTriangle, Shield, Activity, Star, Sparkles, Wallet } from 'lucide-react';
+import { useHasKeyboard } from '@/hooks/useHasKeyboard';
 
 interface Props {
   player: Player | null;
+  /** Crediti rimasti nella mia squadra */
+  remainingBudget: number;
+  /** Massimo offribile ora (lascia 1 cr per ogni slot ancora da riempire) */
+  maxBid: number;
   onBuyMine: (player: Player, price: number) => void;
   onBuyOther: (player: Player) => void;
   onRelease?: (playerId: number) => void;
 }
 
-export function PlayerFocusCard({ player, onBuyMine, onBuyOther, onRelease }: Props) {
+export function PlayerFocusCard({ player, remainingBudget, maxBid, onBuyMine, onBuyOther, onRelease }: Props) {
+  const hasKeyboard = useHasKeyboard();
+
   if (!player) {
     return (
       <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center min-h-[220px] space-y-2">
         <Sparkles className="w-8 h-8 text-slate-600 animate-bounce" />
         <h3 className="font-bold text-slate-300 text-sm">Nessun Calciatore in Battuta</h3>
         <p className="text-xs text-slate-500 max-w-sm">
-          Digita il nome o la squadra nella barra in alto (<kbd className="text-cyan-400">Cmd+K</kbd>) per selezionare il calciatore attualmente all'asta.
+          Digita il nome o la squadra nella barra in alto
+          {hasKeyboard && <> (<kbd className="text-cyan-400">Cmd+K</kbd>)</>} per selezionare il calciatore attualmente all'asta.
         </p>
       </div>
     );
@@ -30,6 +38,8 @@ export function PlayerFocusCard({ player, onBuyMine, onBuyOther, onRelease }: Pr
   const vorp = player.vorp ?? 0;
   const targetPrice = player.targetPrice || player.estPrice || 1;
   const panicPriceCap = Math.round(targetPrice * 1.15) + 1; // Tetto massimo di sopravvalutazione (+15%)
+  const targetOverBudget = targetPrice > maxBid;
+  const capOverBudget = panicPriceCap > maxBid;
 
   const isBoughtByMe = player.boughtFor !== undefined;
   const isLostByMe = !!player.isLost;
@@ -135,7 +145,7 @@ export function PlayerFocusCard({ player, onBuyMine, onBuyOther, onRelease }: Pr
           <div className="text-2xl font-black text-white">
             {targetPrice} <span className="text-xs text-cyan-400">cr</span>
           </div>
-          <p className="text-[10px] text-slate-400 mt-0.5">In base a budget e ruolo</p>
+          <p className="text-[10px] text-slate-400 mt-0.5">Fisso: in base a budget e regole della lega</p>
         </div>
 
         <div className="bg-rose-950/30 border border-rose-900/60 p-3 rounded-xl">
@@ -147,6 +157,29 @@ export function PlayerFocusCard({ player, onBuyMine, onBuyOther, onRelease }: Pr
           </div>
           <p className="text-[10px] text-slate-400 mt-0.5">Soglia massima consigliata</p>
         </div>
+      </div>
+
+      {/* Crediti rimasti e avviso se il prezzo consigliato non è sostenibile */}
+      <div
+        className={`flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl border px-3 py-2 text-[11px] font-semibold ${
+          capOverBudget
+            ? 'bg-rose-950/40 border-rose-800/70 text-rose-200'
+            : 'bg-slate-950/70 border-slate-800 text-slate-300'
+        }`}
+      >
+        <span className="flex items-center gap-1.5">
+          <Wallet className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          Crediti rimasti: <strong className="text-emerald-300" suppressHydrationWarning>{remainingBudget} cr</strong>
+          <span className="text-slate-500" suppressHydrationWarning>· max offerta {maxBid} cr</span>
+        </span>
+        {capOverBudget && (
+          <span className="flex items-center gap-1 font-bold" role="alert">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            {targetOverBudget
+              ? `Non puoi permetterti il prezzo consigliato (${targetPrice} cr)`
+              : `Il prezzo massimo (${panicPriceCap} cr) supera il tuo budget`}
+          </span>
+        )}
       </div>
     </div>
   );

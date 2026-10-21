@@ -15,12 +15,18 @@ import {
   Shield,
   Activity,
   Zap,
+  AlertTriangle,
+  Wallet,
 } from 'lucide-react';
 import { calculateCPS, calculateXFM } from '@/lib/advisor/scoring';
 import { ReleasePlayerModal } from '@/src/components/modals/ReleasePlayerModal';
 
 interface Props {
   players: Player[];
+  /** Crediti rimasti nella mia squadra */
+  remainingBudget: number;
+  /** Massimo offribile ora (lascia 1 cr per ogni slot ancora da riempire) */
+  maxBid: number;
   onBuyPlayer: (playerId: number, price: number, isMine?: boolean) => void;
   onMarkAsLost: (playerId: number) => void;
   onReleasePlayer: (playerId: number, refundAmount?: number) => void;
@@ -31,13 +37,16 @@ type StatusFilter = 'ALL' | 'AVAILABLE' | 'MINE' | 'LOST';
 
 export function ListoneTab({
   players,
+  remainingBudget,
+  maxBid,
   onBuyPlayer,
   onMarkAsLost,
   onReleasePlayer,
 }: Props) {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<'ALL' | Role>('ALL');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  // Di default solo i giocatori ancora liberi: chi è stato perso o preso sparisce subito dall'elenco
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('AVAILABLE');
   const [sortField, setSortField] = useState<SortField>('cps');
   const [sortAsc, setSortAsc] = useState(false);
 
@@ -122,9 +131,24 @@ export function ListoneTab({
     });
   }, [players, search, roleFilter, statusFilter, sortField, sortAsc]);
 
+  // Conteggi per stato (rispettano il filtro ruolo) mostrati sui pulsanti filtro
+  const statusCounts = useMemo(() => {
+    const scoped = roleFilter === 'ALL' ? players : players.filter(p => p.role === roleFilter);
+    return {
+      ALL: scoped.length,
+      AVAILABLE: scoped.filter(p => p.boughtFor === undefined && !p.isLost).length,
+      MINE: scoped.filter(p => p.boughtFor !== undefined).length,
+      LOST: scoped.filter(p => p.isLost).length,
+    } as Record<StatusFilter, number>;
+  }, [players, roleFilter]);
+
+  const buyPrice = parseInt(buyPriceInput, 10) || 0;
+  const buyOverBudget = !!buyingPlayer && buyPrice > maxBid;
+
   const handleConfirmBuy = () => {
     if (!buyingPlayer) return;
     const price = parseInt(buyPriceInput, 10) || buyingPlayer.targetPrice || buyingPlayer.estPrice || 1;
+    if (price > maxBid) return;
     onBuyPlayer(buyingPlayer.id, price, true);
     setBuyingPlayer(null);
     setBuyPriceInput('');
@@ -179,10 +203,10 @@ export function ListoneTab({
         <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
           <Filter className="w-3.5 h-3.5 text-slate-400 ml-1.5" />
           {[
-            { id: 'ALL' as StatusFilter, label: 'Tutti' },
             { id: 'AVAILABLE' as StatusFilter, label: 'Liberi' },
             { id: 'MINE' as StatusFilter, label: 'Mia Rosa' },
             { id: 'LOST' as StatusFilter, label: 'Persi' },
+            { id: 'ALL' as StatusFilter, label: 'Tutti' },
           ].map(s => (
             <button
               key={s.id}
@@ -193,7 +217,7 @@ export function ListoneTab({
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              {s.label}
+              {s.label} <span className="opacity-60 font-semibold">{statusCounts[s.id]}</span>
             </button>
           ))}
         </div>
@@ -427,12 +451,30 @@ export function ListoneTab({
                 max={1000}
                 value={buyPriceInput}
                 onChange={e => setBuyPriceInput(e.target.value)}
-                className="w-full bg-slate-950 border border-cyan-500 rounded-xl px-3 py-2 text-base text-cyan-300 text-center font-black"
+                className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-base text-center font-black ${
+                  buyOverBudget ? 'border-rose-500 text-rose-300' : 'border-cyan-500 text-cyan-300'
+                }`}
                 autoFocus
                 onKeyDown={e => {
                   if (e.key === 'Enter') handleConfirmBuy();
                 }}
               />
+              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] font-semibold">
+                <span className="flex items-center gap-1 text-slate-300">
+                  <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                  Crediti rimasti: <strong className="text-emerald-300">{remainingBudget} cr</strong>
+                </span>
+                {buyOverBudget ? (
+                  <span className="flex items-center gap-1 text-rose-300 font-bold" role="alert">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    Sfori di {buyPrice - maxBid} cr (max {maxBid} cr)
+                  </span>
+                ) : buyPrice > 0 ? (
+                  <span className="text-slate-400">
+                    Dopo l&apos;acquisto: <strong className="text-cyan-300">{remainingBudget - buyPrice} cr</strong>
+                  </span>
+                ) : null}
+              </div>
             </div>
 
             <div className="flex gap-2">
@@ -446,7 +488,8 @@ export function ListoneTab({
               <button
                 type="button"
                 onClick={handleConfirmBuy}
-                className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg"
+                disabled={buyOverBudget}
+                className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-black shadow-lg"
               >
                 Conferma Acquisto
               </button>

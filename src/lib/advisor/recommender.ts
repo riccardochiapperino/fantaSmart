@@ -119,14 +119,14 @@ export function getStrategicNominations(
       const vorp = calculateVORP(scoreObj.cps, baselines[p.role]);
 
       // Rapporto Qualità/Prezzo
-      const price = p.estPrice || 1;
+      const price = p.targetPrice || p.estPrice || 1;
       const efficiency = (vorp * 10 + scoreObj.cps) / price;
 
       return {
         player: p,
         type: 'target' as const,
-        reason: `Alta efficienza (CPS ${scoreObj.cps}, VORP +${vorp.toFixed(1)} a soli ${p.estPrice} cr)`,
-        estimatedDynamicPrice: p.estPrice,
+        reason: `Alta efficienza (CPS ${scoreObj.cps}, VORP +${vorp.toFixed(1)} a soli ${p.targetPrice || p.estPrice} cr)`,
+        estimatedDynamicPrice: p.targetPrice || p.estPrice,
         cps: scoreObj.cps,
         hypeIndex: Number((p.fvm / (scoreObj.cps * 10 || 1)).toFixed(2)),
         efficiency,
@@ -154,7 +154,7 @@ export function getStrategicNominations(
       const titolarita = p.titolarita ?? (p.isTitular ? 0.85 : 0.4);
 
       // Punteggio Esca: Alto FVM, Alto Prezzo Stimato, ma CPS deludente o Titolarità incerta o Fragilità
-      const baitScore = (p.fvm * 0.4) + (p.estPrice * 0.4) - (scoreObj.cps * 10) + (injuryRisk * 3);
+      const baitScore = (p.fvm * 0.4) + ((p.targetPrice || p.estPrice) * 0.4) - (scoreObj.cps * 10) + (injuryRisk * 3);
 
       let reason = `Hype elevato (FVM ${p.fvm}) ma CPS reale basso (${scoreObj.cps})`;
       if (injuryRisk >= 6) {
@@ -167,7 +167,7 @@ export function getStrategicNominations(
         player: p,
         type: 'bait' as const,
         reason,
-        estimatedDynamicPrice: p.estPrice,
+        estimatedDynamicPrice: p.targetPrice || p.estPrice,
         cps: scoreObj.cps,
         hypeIndex,
         baitScore,

@@ -31,8 +31,12 @@ export function getRoleBudgetShares(defenseModifier: boolean): Record<Role, numb
  * Calcola il punteggio CPS del giocatore di rimpiazzo (Baseline) per ogni ruolo.
  * K_r = N_squadre * Slot_r (es. 8 squadre x 8 difensori = 64° giocatore).
  */
-export function calculateRoleBaselines(players: Player[], config: LeagueConfig): Record<Role, number> {
-  const scoresMap = calculateAllPlayerScores(players);
+export function calculateRoleBaselines(
+  players: Player[],
+  config: LeagueConfig,
+  precomputedScores?: Map<number, { xfm: number; cps: number }>
+): Record<Role, number> {
+  const scoresMap = precomputedScores ?? calculateAllPlayerScores(players);
   const roles: Role[] = ['P', 'D', 'C', 'A'];
   const baselines: Record<Role, number> = { P: 0, D: 0, C: 0, A: 0 };
 
@@ -236,6 +240,109 @@ export function calculateDynamicTargetPriceForPlayer(
   return adjustedPrice;
 }
 
+// Peso della quotazione di mercato (FVM) rispetto al rendimento atteso (VORP) nel prezzo consigliato.
+// L'FVM rappresenta quanto il mercato è disposto a pagare un giocatore, il VORP quanto rende
+// rispetto al rimpiazzo: il prezzo di asta dipende da entrambi.
+export const PRICE_FVM_WEIGHT = 0.5;
+
+export interface FixedPricing {
+  targetPrice: number;
+  cps: number;
+  vorp: number;
+}
+
+/**
+ * Prezzo consigliato FISSO di ogni calciatore, stabilito in base alle regole della lega.
+ *
+ * Dipende SOLO da: budget iniziale, numero di squadre, slot per reparto, modificatore difesa
+ * e caratteristiche dei giocatori (FVM, titolarità, rigori, infortuni).
+ * NON dipende da acquisti, perse o crediti rimasti: pagare Malen a un prezzo qualsiasi non
+ * cambia il prezzo consigliato di Lautaro.
+ *
+ * Modello: in ogni reparto la lega spende in totale
+ *   numSquadre * (budget - 1 credito per slot) * quotaReparto
+ * e questo denaro viene ripartito tra i `numSquadre * slot` giocatori che verranno acquistati,
+ * in proporzione al loro peso (media tra quota FVM e quota VORP). Ogni giocatore parte da 1 credito.
+ */
+export function calculateFixedPricing(
+  players: Player[],
+  config: LeagueConfig
+): Map<number, FixedPricing> {
+  const result = new Map<number, FixedPricing>();
+  const scoresMap = calculateAllPlayerScores(players);
+  const baselines = calculateRoleBaselines(players, config, scoresMap);
+
+  const totalSlots = Object.values(config.slotsPerRole).reduce((a, b) => a + b, 0);
+  const elasticPerTeam = Math.max(0, config.initialBudget - totalSlots);
+  // Nessun giocatore può costare più di quanto una squadra possa spendere lasciando 1 cr agli altri slot
+  const maxPrice = Math.max(1, config.initialBudget - Math.max(0, totalSlots - 1));
+  const shares = getRoleBudgetShares(config.defenseModifier);
+  const roles: Role[] = ['P', 'D', 'C', 'A'];
+
+  for (const role of roles) {
+    const pool = players.filter(p => p.role === role);
+    if (pool.length === 0) continue;
+
+    const maxFvm = Math.max(1, ...pool.map(p => p.fvm || 0));
+    const maxCps = Math.max(0.001, ...pool.map(p => scoresMap.get(p.id)?.cps ?? 0));
+
+    const ranked = pool
+      .map(p => {
+        const cps = scoresMap.get(p.id)?.cps ?? 0;
+        return {
+          player: p,
+          cps,
+          vorp: calculateVORP(cps, baselines[role]),
+          rankScore: PRICE_FVM_WEIGHT * ((p.fvm || 0) / maxFvm) + (1 - PRICE_FVM_WEIGHT) * (cps / maxCps),
+        };
+      })
+      .sort((a, b) => b.rankScore - a.rankScore);
+
+    const buyers = Math.max(1, config.numTeams * (config.slotsPerRole[role] ?? 0));
+    const top = ranked.slice(0, buyers);
+    const sumFvm = top.reduce((s, e) => s + (e.player.fvm || 0), 0);
+    const sumVorp = top.reduce((s, e) => s + e.vorp, 0);
+    const roleMoney = config.numTeams * elasticPerTeam * shares[role];
+
+    top.forEach(e => {
+      const fvmShare = sumFvm > 0 ? (e.player.fvm || 0) / sumFvm : 1 / top.length;
+      const vorpShare = sumVorp > 0 ? e.vorp / sumVorp : 1 / top.length;
+      const weight = PRICE_FVM_WEIGHT * fvmShare + (1 - PRICE_FVM_WEIGHT) * vorpShare;
+      const price = Math.min(maxPrice, Math.max(1, Math.round(1 + roleMoney * weight)));
+      result.set(e.player.id, { targetPrice: price, cps: e.cps, vorp: e.vorp });
+    });
+
+    // Giocatori fuori dai "comprati attesi": prezzo minimo
+    for (const e of ranked.slice(buyers)) {
+      result.set(e.player.id, { targetPrice: 1, cps: e.cps, vorp: e.vorp });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Applica a ogni giocatore prezzo consigliato, CPS e VORP calcolati con le regole attuali della lega.
+ * Restituisce nuovi oggetti solo quando i valori cambiano.
+ */
+export function applyFixedPricing(players: Player[], config: LeagueConfig): Player[] {
+  const pricing = calculateFixedPricing(players, config);
+  return players.map(p => {
+    const info = pricing.get(p.id);
+    if (!info) return p;
+    if (p.targetPrice === info.targetPrice && p.cps === info.cps && p.vorp === info.vorp) return p;
+    return { ...p, targetPrice: info.targetPrice, cps: info.cps, vorp: info.vorp };
+  });
+}
+
+/**
+ * Credito massimo che posso offrire per un giocatore: devo lasciare almeno 1 credito
+ * per ognuno degli slot ancora da riempire dopo di lui.
+ */
+export function calculateMaxBid(remainingBudget: number, slotsToFill: number): number {
+  return Math.max(0, remainingBudget - Math.max(0, slotsToFill - 1));
+}
+
 /**
  * Calcola il tasso di inflazione attuale del mercato d'asta.
  * Ratio > 1.0 significa che la lega sta strapagando i calciatori rispetto alle stime.
@@ -245,7 +352,7 @@ export function calculateMarketInflation(allPlayers: Player[]): number {
   if (boughtPlayers.length === 0) return 1.0;
 
   const totalSpent = boughtPlayers.reduce((sum, p) => sum + (p.boughtFor ?? 0), 0);
-  const totalEst = boughtPlayers.reduce((sum, p) => sum + (p.estPrice ?? 1), 0);
+  const totalEst = boughtPlayers.reduce((sum, p) => sum + (p.targetPrice ?? p.estPrice ?? 1), 0);
 
   if (totalEst <= 0) return 1.0;
   return Number((totalSpent / totalEst).toFixed(2));

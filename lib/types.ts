@@ -10,7 +10,7 @@ export interface Player {
     tacticalRole?: TacticalRole;
     qtA: number;
     fvm: number;
-    estPrice: number; // Stima su budget 500
+    estPrice: number; // Stima statica del dataset (su budget 500): solo fallback, il prezzo vero è targetPrice
     slot: number;     // 1° - 8° Slot
     slotTier?: number;
     tier?: number;     // Livello qualità (1 = Top, 2 = Semi-Top, 3 = Titolare, 4 = Alternativa, 5 = Scommessa)
@@ -149,6 +149,8 @@ export interface AdvisorState {
   remainingBudget: number;
   spentBudget: number;
   totalLeagueBudget: number;
+  slotsToFill: number;        // Slot della mia rosa ancora da riempire
+  maxBid: number;             // Massimo offribile ora: lascia 1 cr per ogni slot ancora vuoto dopo il prossimo
   currentInflation: number;
   targetBudgetsBySlot: Record<Role, SlotBudgetAllocation[]>;
   leagueConfig: LeagueConfig;

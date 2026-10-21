@@ -19,7 +19,9 @@ import {
   updateAuctionSession,
   AuctionSession,
 } from '@/lib/storage/multiAuctionStore';
+import { clearAuctionStorage } from '@/lib/storage/auctionStorage';
 import { TabType, Role, Player } from '@/lib/types';
+import type { UserAccount } from '@/lib/auth';
 import { useFanta } from '@/hooks/useFanta';
 import { Navbar } from '@/components/ui/Navbar';
 import { BottomNav } from '@/components/BottomNav';
@@ -37,18 +39,7 @@ function AuctionContent() {
   const initialTabParam = (searchParams.get('tab') as TabType) || 'asta';
 
   const { user, isLoading: authLoading } = useAuth();
-  const [activeTab, setActiveTab] = useState<TabType>(initialTabParam);
   const [currentSession, setCurrentSession] = useState<AuctionSession | null>(null);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [focusedPlayer, setFocusedPlayer] = useState<Player | null>(null);
-
-  const isGuest = !user || user.isGuest || user.id?.startsWith('guest-');
-  const targetAuctionId = auctionIdParam || user?.activeAuctionId || currentSession?.id;
-
-  const fanta = useFanta({
-    auctionId: targetAuctionId,
-    isGuest,
-  });
 
   // 1. Auth Guard: Se non autenticato, reindirizza a /login
   useEffect(() => {
@@ -70,27 +61,6 @@ function AuctionContent() {
     }
   }, [user, auctionIdParam, router]);
 
-  // 3. Sincronizzazione automatica delle modifiche all'asta attiva
-  useEffect(() => {
-    if (!user || !currentSession || !fanta.advisorState) return;
-
-    updateAuctionSession(user.id, currentSession.id, {
-      allPlayers: fanta.advisorState.allPlayers,
-      myRoster: fanta.advisorState.myRoster,
-      opponents: fanta.advisorState.opponents,
-      remainingBudget: fanta.advisorState.remainingBudget,
-      leagueConfig: fanta.advisorState.leagueConfig,
-    });
-  }, [
-    user,
-    currentSession?.id,
-    fanta.advisorState?.myRoster,
-    fanta.advisorState?.remainingBudget,
-    fanta.advisorState?.opponents,
-    fanta.advisorState?.allPlayers,
-    fanta.advisorState?.leagueConfig,
-  ]);
-
   if (authLoading || !user || !currentSession) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center text-cyan-400 font-bold text-sm animate-pulse">
@@ -98,6 +68,61 @@ function AuctionContent() {
       </div>
     );
   }
+
+  // L'area di lavoro nasce solo a sessione caricata: così il motore parte con le regole
+  // (budget, squadre, slot, modificatore) scelte per questa lega e non con i default.
+  return (
+    <AuctionWorkspace
+      key={currentSession.id}
+      user={user}
+      session={currentSession}
+      initialTab={initialTabParam}
+    />
+  );
+}
+
+function AuctionWorkspace({
+  user,
+  session: currentSession,
+  initialTab,
+}: {
+  user: UserAccount;
+  session: AuctionSession;
+  initialTab: TabType;
+}) {
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [focusedPlayer, setFocusedPlayer] = useState<Player | null>(null);
+  // Cambia a ogni azzeramento dell'asta per ripartire con cronologia transazioni vuota
+  const [cockpitKey, setCockpitKey] = useState(0);
+
+  const isGuest = !!(user.isGuest || user.id?.startsWith('guest-'));
+
+  // Unica istanza del motore: condivisa da Cockpit, Rosa, Listone, Sostituto e Impostazioni
+  const fanta = useFanta({
+    auctionId: currentSession.id,
+    isGuest,
+    initialConfig: currentSession.leagueConfig,
+  });
+
+  const handleResetAuction = () => {
+    clearAuctionStorage(currentSession.id, isGuest);
+    fanta.advisor.resetAuction();
+    setFocusedPlayer(null);
+    setCockpitKey(k => k + 1);
+  };
+
+  // Sincronizzazione automatica delle modifiche all'asta attiva
+  const { allPlayers, myRoster, opponents, remainingBudget, leagueConfig } = fanta.advisorState;
+  useEffect(() => {
+    updateAuctionSession(user.id, currentSession.id, {
+      allPlayers,
+      myRoster,
+      opponents,
+      remainingBudget,
+      leagueConfig,
+    });
+  }, [user.id, currentSession.id, allPlayers, myRoster, opponents, remainingBudget, leagueConfig]);
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 font-sans pb-20 overflow-x-hidden w-full transition-colors duration-200">
@@ -128,7 +153,10 @@ function AuctionContent() {
                 {currentSession.name}
               </span>
               <span className="text-[10px] font-black bg-cyan-500/15 text-cyan-600 dark:text-cyan-400 px-2 py-0.5 rounded-md border border-cyan-500/30">
-                {currentSession.leagueConfig.numTeams} Squadre
+                {fanta.advisorState.leagueConfig.numTeams} Squadre
+              </span>
+              <span className="hidden sm:inline text-[10px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 px-2 py-0.5 rounded-md border border-emerald-500/30">
+                {fanta.advisorState.leagueConfig.initialBudget} cr
               </span>
             </div>
           </div>
@@ -193,6 +221,8 @@ function AuctionContent() {
       <main className="p-3 sm:p-4 max-w-7xl mx-auto space-y-4">
         {activeTab === 'asta' && (
           <LiveAuctionCockpit
+            key={cockpitKey}
+            advisor={fanta.advisor}
             selectedPlayer={focusedPlayer}
             onSelectPlayer={setFocusedPlayer}
             auctionId={currentSession.id}
@@ -244,6 +274,8 @@ function AuctionContent() {
         {activeTab === 'home' && (
           <ListoneTab
             players={fanta.players}
+            remainingBudget={fanta.remainingBudget}
+            maxBid={fanta.maxBid}
             onBuyPlayer={(id, price) => fanta.buyPlayer(id, price, true)}
             onMarkAsLost={fanta.markAsLost}
             onReleasePlayer={fanta.releasePlayer}
@@ -258,6 +290,17 @@ function AuctionContent() {
       <SettingsModal
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        leagueConfig={fanta.advisorState.leagueConfig}
+        onSaveLeagueConfig={fanta.updateLeagueConfig}
+        onExportBackup={fanta.exportBackup}
+        onImportBackup={fanta.importBackup}
+        onResetAuction={handleResetAuction}
+        onResetFactory={() => {
+          clearAuctionStorage(currentSession.id, isGuest);
+          fanta.resetToFactoryDataset();
+          setFocusedPlayer(null);
+          setCockpitKey(k => k + 1);
+        }}
       />
     </div>
   );
