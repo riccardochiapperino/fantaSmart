@@ -1,0 +1,16 @@
+{
+  "name": "FantaSmart 2026/2027 • Live Auction Engine",
+  "short_name": "FantaSmart",
+  "description": "Motore decisionale a latenza zero per l'asta del Fantacalcio Serie A 2026/2027",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#06b6d4",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ]
+}

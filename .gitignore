@@ -1,0 +1,68 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
+Thumbs.db
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env and credentials files (ignored in git)
+.env*
+!.env.example
+*.local.json
+.credentials*
+.secret*
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# editor / assistant local config
+.vscode/
+.idea/
+.claude/
+
+# --- Non necessari al funzionamento dell'app ---------------------------------
+# Note interne di sviluppo (contengono anche credenziali demo in chiaro)
+/.aus/
+
+# Dati sorgente grezzi: l'app usa il dataset già generato in
+# src/lib/mock/realDataset2026.ts. Servono solo per rigenerarlo.
+/.footballData/
+/Quotazioni_Fantacalcio_Stagione_*.xlsx
+/info titolarità*.txt
+
+# Script legacy che rigenera lib/data.ts (file deprecato e non più usato)
+/aggiorna.py
+
+# File temporanei di Office
+~$*
+*.docx
